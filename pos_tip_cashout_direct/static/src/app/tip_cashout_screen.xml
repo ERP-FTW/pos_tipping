@@ -5,7 +5,11 @@
             <div class="top-content d-flex align-items-center p-2 border-bottom bg-view">
                 <button class="btn btn-secondary" t-on-click="() => this.back()">Back</button>
                 <h2 class="ms-3 mb-0">Tips / Cashout</h2>
-                <button class="btn btn-primary ms-auto" t-on-click="() => this.loadSummary()">Refresh</button>
+                <div class="ms-auto me-3 text-end">
+                    <div class="fw-bold">Current Drawer</div>
+                    <div t-esc="env.utils.formatCurrency(state.drawerBalance)"/>
+                </div>
+                <button class="btn btn-primary" t-on-click="() => this.loadSummary()">Refresh</button>
             </div>
             <div class="content overflow-auto p-3">
                 <table class="table table-sm table-hover bg-view">

@@ -4,6 +4,7 @@ import { Component, onWillStart, useState } from "@odoo/owl";
 import { usePos } from "@point_of_sale/app/store/pos_hook";
 import { useService } from "@web/core/utils/hooks";
 import { NumberPopup } from "@point_of_sale/app/utils/input_popups/number_popup";
+import { SelectionPopup } from "@point_of_sale/app/utils/input_popups/selection_popup";
 import { ask, makeAwaitable } from "@point_of_sale/app/store/make_awaitable_dialog";
 
 export class TipCashoutScreen extends Component {
@@ -14,18 +15,44 @@ export class TipCashoutScreen extends Component {
         this.orm = useService("orm");
         this.notification = useService("notification");
         this.dialog = useService("dialog");
-        this.state = useState({ lines: [] });
+        this.state = useState({ lines: [], drawerBalance: 0 });
         onWillStart(() => this.loadSummary());
     }
     async loadSummary() {
         this.state.lines = await this.orm.call("pos.session", "get_tip_cashout_summary", [[this.pos.session.id]]);
+        this.state.drawerBalance = await this.orm.call("pos.session", "get_tip_cash_drawer_balance", [[this.pos.session.id]]);
+    }
+    get payableEmployeeLines() {
+        return this.state.lines.filter((line) => line.employee_id && line.card_tips_remaining > 0);
+    }
+    async selectPayoutEmployee(line) {
+        const payoutLines = this.payableEmployeeLines;
+        if (!payoutLines.length) {
+            this.notification.add(_t("There are no employee card tips available for payout."), { type: "warning" });
+            return false;
+        }
+        return await makeAwaitable(this.dialog, SelectionPopup, {
+            title: _t("Select cashout recipient"),
+            list: payoutLines.map((payoutLine) => ({
+                id: payoutLine.employee_id,
+                label: payoutLine.employee_name,
+                description: _t("Remaining card tips: %s", this.env.utils.formatCurrency(payoutLine.card_tips_remaining)),
+                isSelected: payoutLine.employee_id === line.employee_id,
+                item: payoutLine,
+            })),
+        });
     }
     async pay(line) {
         if (!line.employee_id) {
             this.notification.add(_t("Unassigned tips must be reviewed in backend before payout."), { type: "warning" });
             return;
         }
-        const remaining = line.card_tips_remaining || line.pos_card_tips || 0;
+        const payoutLine = await this.selectPayoutEmployee(line);
+        if (!payoutLine) {
+            return;
+        }
+        const drawerBefore = this.state.drawerBalance || 0;
+        const remaining = payoutLine.card_tips_remaining || payoutLine.pos_card_tips || 0;
         if (remaining <= 0) {
             this.notification.add(_t("There are no remaining card tips to pay out for this employee."), { type: "warning" });
             return;
@@ -56,10 +83,12 @@ export class TipCashoutScreen extends Component {
         }
         const confirmed = await ask(this.dialog, {
             title: _t("Confirm tip payout"),
-            body: _t("This will create a cash-out from the POS drawer for %(employee)s.\n\nPayout amount: %(amount)s\nRemaining after payout: %(remaining)s\n\nConfirm only after counting cash and handing it to the employee.", {
-                employee: line.employee_name,
+            body: _t("This will create a cash-out from the POS drawer for %(employee)s.\n\nPayout amount: %(amount)s\nRemaining card tips after payout: %(remaining)s\nDrawer before payout: %(drawerBefore)s\nDrawer after payout: %(drawerAfter)s\n\nConfirm only after counting cash and handing it to the selected employee.", {
+                employee: payoutLine.employee_name,
                 amount: this.env.utils.formatCurrency(amount),
                 remaining: this.env.utils.formatCurrency(remaining - amount),
+                drawerBefore: this.env.utils.formatCurrency(drawerBefore),
+                drawerAfter: this.env.utils.formatCurrency(drawerBefore - amount),
             }),
             confirmLabel: _t("Create Cash-Out"),
             cancelLabel: _t("Go Back"),
@@ -67,7 +96,7 @@ export class TipCashoutScreen extends Component {
         if (!confirmed) {
             return;
         }
-        await this.orm.call("pos.session", "create_tip_cashout", [this.pos.session.id, line.employee_id, line.declared_cash_tips || 0, amount]);
+        await this.orm.call("pos.session", "create_tip_cashout", [this.pos.session.id, payoutLine.employee_id, payoutLine.declared_cash_tips || 0, amount]);
         await this.loadSummary();
         this.notification.add(_t("Tip payout cash-out created."));
     }

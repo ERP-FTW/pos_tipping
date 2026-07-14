@@ -74,6 +74,11 @@ class PosSession(models.Model):
                 group['state'] = False
         return sorted(groups.values(), key=lambda group: (not group['employee_id'], group['employee_name']))
 
+
+    def get_tip_cash_drawer_balance(self):
+        self.ensure_one()
+        return self.cash_register_balance_end
+
     @api.model
     def create_tip_cashout(self, session_id, employee_id, declared_cash_tips=0.0, card_tips_paid_from_drawer=0.0):
         session = self.browse(session_id).exists()
